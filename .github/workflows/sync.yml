@@ -1,0 +1,86 @@
+name: Sync upstream templates
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # every day, 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "官方版本号，如 1.37.4；留空 = 官方最新 release"
+        required: false
+        default: ""
+      retry:
+        description: "版本相同也重新处理（用于补译上次失败的句子）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  models: read # lets GITHUB_TOKEN call GitHub Models
+
+concurrency:
+  group: sync-templates
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub disables scheduled workflows after 60 days without repository activity.
+      - name: Keepalive
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( ($(date +%s) - last) / 86400 )) -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keepalive"
+            git push
+          fi
+
+      - name: Sync and translate
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # optional fallback
+          TRANSLATE_PROVIDER: ${{ vars.TRANSLATE_PROVIDER || 'github,gemini' }}
+          GH_MODELS_MODEL: ${{ vars.GH_MODELS_MODEL }} # optional, default openai/gpt-4.1-mini
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }} # optional, default gemini-flash-latest
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_RETRY: ${{ inputs.retry }}
+        run: |
+          args=()
+          [ -n "$INPUT_VERSION" ] && args+=(--version "$INPUT_VERSION")
+          [ "$INPUT_RETRY" = "true" ] && args+=(--retry)
+          python3 scripts/sync.py "${args[@]}" --report "$RUNNER_TEMP/report.md"
+
+      - name: Open or update pull request
+        if: steps.sync.outputs.uptodate != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.sync.outputs.version }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes."
+            exit 0
+          fi
+          branch="sync/${VERSION}"
+          title="Sync email templates to Vaultwarden ${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add -A
+          git commit -m "$title"
+          git push --force origin "$branch"
+          num=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh pr edit "$num" --title "$title" --body-file "$RUNNER_TEMP/report.md"
+          else
+            gh pr create --base "$BASE" --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/report.md"
+          fi

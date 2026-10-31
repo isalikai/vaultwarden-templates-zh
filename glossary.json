@@ -1,0 +1,23 @@
+{
+  "keep": [
+    "Vaultwarden", "Bitwarden", "GitHub", "Yubikey", "YubiKey", "FIDO2", "WebAuthn",
+    "Authenticator", "Send", "SMTP", "TOTP", "SSO", "API", "IP"
+  ],
+  "terms": {
+    "vault": "密码库",
+    "web vault": "网页版密码库",
+    "master password": "主密码",
+    "master password hint": "主密码提示",
+    "account": "账户",
+    "device": "设备",
+    "organization": "组织",
+    "collection": "集合",
+    "emergency access": "紧急访问",
+    "two-step login": "两步登录",
+    "email address": "邮箱地址",
+    "log in / login": "登录",
+    "Settings": "设置",
+    "My Account": "我的账户",
+    "administrator / admin": "管理员"
+  }
+}
